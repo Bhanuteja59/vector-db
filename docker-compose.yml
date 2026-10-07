@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  vectordb:
+    build: .
+    container_name: aegis_vector_db
+    env_file:
+      - .env
+    ports:
+      - "${VECTORDB_PORT:-8000}:8000"
+    volumes:
+      # Persistent host directory for WAL logs, snapshots, and index files
+      - ./data:/app/data
+    environment:
+      - VECTORDB_DATA_DIR=/app/data
+      - VECTORDB_AUTO_PERSIST=true
+    restart: unless-stopped
