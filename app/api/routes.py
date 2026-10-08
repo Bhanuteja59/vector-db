@@ -1,5 +1,5 @@
 import time
-from typing import List
+from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException, Depends
 from app.api.schemas import (
     BatchInsertRequest,
@@ -200,6 +200,19 @@ def delete_record(
     if not success:
         raise HTTPException(status_code=404, detail=f"Record '{record_id}' not found.")
     return StatusResponse(success=True, message=f"Record '{record_id}' deleted successfully.")
+
+@router.post("/collections/{name}/delete_by_filter", response_model=StatusResponse)
+def delete_by_filter(
+    name: str,
+    filter_dict: Dict[str, Any],
+    manager: CollectionManager = Depends(get_manager)
+):
+    coll = manager.get_collection(name)
+    if not coll:
+        raise HTTPException(status_code=404, detail=f"Collection '{name}' not found.")
+
+    count = coll.delete_by_filter(filter_dict)
+    return StatusResponse(success=True, message=f"Deleted {count} record(s) matching filter from '{name}'.")
 
 @router.post("/collections/{name}/snapshot", response_model=StatusResponse)
 def snapshot_collection(name: str, manager: CollectionManager = Depends(get_manager)):

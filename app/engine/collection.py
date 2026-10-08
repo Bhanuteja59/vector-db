@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from app.core.types import DistanceMetric, IndexType, SearchResult, VectorRecord
+from app.engine.filter import matches_filter
 from app.index.base import VectorIndex
 from app.index.flat import FlatIndex
 from app.index.hnsw import HNSWIndex
@@ -85,6 +86,18 @@ class Collection:
             if success and self.auto_persist:
                 self.wal.log_delete(record_id)
             return success
+
+    def delete_by_filter(self, filter_dict: Dict[str, Any]) -> int:
+        with self._lock:
+            matching_ids = [
+                rec_id for rec_id, meta in self.index.metadata_store.items()
+                if matches_filter(meta, filter_dict)
+            ]
+            deleted_count = 0
+            for rec_id in matching_ids:
+                if self.delete(rec_id):
+                    deleted_count += 1
+            return deleted_count
 
     def get(self, record_id: str) -> Optional[VectorRecord]:
         with self._lock:
