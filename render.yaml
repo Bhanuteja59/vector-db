@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: aegis-vector-db
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: VECTORDB_API_KEY
+        value: tv_live_sec_71a1e90b8d59e8e5df1d8c8f8eeeaffc4aac72fb348f2cb6
+      - key: VECTORDB_AUTO_PERSIST
+        value: "true"
+      - key: VECTORDB_LOG_LEVEL
+        value: INFO

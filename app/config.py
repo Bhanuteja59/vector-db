@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "AegisVector DB"
     VERSION: str = "1.0.0"
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = int(os.environ.get("PORT", os.environ.get("VECTORDB_PORT", "8000")))
     DATA_DIR: Path = Path("./data")
     AUTO_PERSIST: bool = True
     API_KEY: Optional[str] = None  # If set, requires 'X-API-Key' header on API endpoints
