@@ -28,6 +28,7 @@ class SearchRequest(BaseModel):
     vector: List[float] = Field(..., description="Query vector embedding")
     k: int = Field(default=5, gt=0, le=500, description="Number of nearest neighbors to return")
     filter: Optional[Dict[str, Any]] = Field(default=None, description="Metadata filter expression")
+    keywords: Optional[List[str]] = Field(default=None, description="Optional keywords for hybrid metadata re-ranking")
 
 class SearchResponse(BaseModel):
     results: List[SearchResult]

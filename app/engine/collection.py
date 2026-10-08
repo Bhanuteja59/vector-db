@@ -40,6 +40,7 @@ class Collection:
         # Storage components
         self.persistence = PersistenceManager(data_dir)
         self.wal = WriteAheadLog(data_dir / f"{name}.wal")
+        self._wal_ops = 0
 
     def insert(self, record_id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None) -> None:
         with self._lock:
@@ -47,25 +48,36 @@ class Collection:
             # WAL write first for durability
             if self.auto_persist:
                 self.wal.log_insert(record_id, vector, meta)
+                self._wal_ops += 1
 
             # In-memory index update
             self.index.add(record_id, np.array(vector, dtype=np.float32), meta)
+            if self.auto_persist and self._wal_ops >= 3000:
+                self.snapshot()
+                self._wal_ops = 0
 
     def insert_batch(self, records: List[VectorRecord]) -> int:
         with self._lock:
+            if self.auto_persist:
+                self.wal.log_batch_insert(records)
+                self._wal_ops += len(records)
             for r in records:
-                self.insert(r.id, r.vector, r.metadata)
+                self.index.add(r.id, np.array(r.vector, dtype=np.float32), r.metadata)
+            if self.auto_persist and self._wal_ops >= 3000:
+                self.snapshot()
+                self._wal_ops = 0
             return len(records)
 
     def search(
         self,
         query: List[float],
         k: int = 10,
-        filter_dict: Optional[Dict[str, Any]] = None
+        filter_dict: Optional[Dict[str, Any]] = None,
+        keywords: Optional[List[str]] = None
     ) -> List[SearchResult]:
         with self._lock:
             q_arr = np.array(query, dtype=np.float32)
-            return self.index.search(q_arr, k=k, filter_dict=filter_dict)
+            return self.index.search(q_arr, k=k, filter_dict=filter_dict, keywords=keywords)
 
     def delete(self, record_id: str) -> bool:
         with self._lock:

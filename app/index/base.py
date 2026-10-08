@@ -20,7 +20,8 @@ class VectorIndex(ABC):
         self,
         query: np.ndarray,
         k: int = 10,
-        filter_dict: Optional[Dict[str, Any]] = None
+        filter_dict: Optional[Dict[str, Any]] = None,
+        keywords: Optional[List[str]] = None
     ) -> List[SearchResult]:
         """Search top-k nearest neighbors matching optional filter."""
         pass

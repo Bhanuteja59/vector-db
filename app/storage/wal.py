@@ -23,6 +23,15 @@ class WriteAheadLog:
         }
         self._append(entry)
 
+    def log_batch_insert(self, records: list[Any]) -> None:
+        lines = [
+            json.dumps({"op": "insert", "id": r.id, "vector": r.vector, "metadata": r.metadata}) + "\n"
+            for r in records
+        ]
+        with open(self.wal_path, "a", encoding="utf-8") as f:
+            f.writelines(lines)
+            f.flush()
+
     def log_delete(self, record_id: str) -> None:
         entry = {
             "op": "delete",

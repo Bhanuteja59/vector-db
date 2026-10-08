@@ -4,7 +4,7 @@ import random
 from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 
-from app.core.distance import compute_distance, distance_to_score
+from app.core.distance import batch_compute_distances, compute_distance, distance_to_score
 from app.core.types import DistanceMetric, SearchResult, VectorRecord
 from app.engine.filter import matches_filter
 from app.index.base import VectorIndex
@@ -178,7 +178,8 @@ class HNSWIndex(VectorIndex):
         self,
         query: np.ndarray,
         k: int = 10,
-        filter_dict: Optional[Dict[str, Any]] = None
+        filter_dict: Optional[Dict[str, Any]] = None,
+        keywords: Optional[List[str]] = None
     ) -> List[SearchResult]:
         if self.count() == 0 or k <= 0 or self.entry_point is None:
             return []
@@ -204,55 +205,85 @@ class HNSWIndex(VectorIndex):
 
         # Search layer 0 with dynamic ef
         ef = max(self.ef_search, k * 2)
-        if filter_dict:
-            ef = max(ef, k * 5, 64)
-
-        candidates = self._search_layer(q, [curr_obj], ef, 0)
+        kw_list = [kw.lower() for kw in (keywords or [])]
 
         results: List[SearchResult] = []
-        found_ids: Set[str] = set()
+
+        if filter_dict:
+            # High-speed vectorized candidate scan with NumPy BLAS and hybrid keyword boosting
+            rec_ids = list(self.vectors.keys())
+            if not rec_ids:
+                return []
+
+            matching_ids = []
+            matching_vecs = []
+            matching_metas = []
+
+            for rec_id in rec_ids:
+                meta = self.metadata_store.get(rec_id, {})
+                if matches_filter(meta, filter_dict):
+                    matching_ids.append(rec_id)
+                    matching_vecs.append(self.vectors[rec_id])
+                    matching_metas.append(meta)
+
+            if not matching_ids:
+                return []
+
+            vec_matrix = np.array(matching_vecs, dtype=np.float32)
+            dists = batch_compute_distances(q, vec_matrix, self.metric)
+
+            filtered_candidates: List[Tuple[float, float, str, Dict[str, Any]]] = []
+            for idx, rec_id in enumerate(matching_ids):
+                dist = float(dists[idx])
+                meta = matching_metas[idx]
+                base_score = distance_to_score(dist, self.metric)
+                kw_boost = 0.0
+                if kw_list:
+                    snippet = str(meta.get("text_snippet", "")).lower()
+                    match_count = sum(1 for kw in kw_list if kw in snippet)
+                    if match_count > 0:
+                        kw_boost = (match_count / len(kw_list)) * 3.5
+                final_score = base_score + kw_boost
+                filtered_candidates.append((final_score, dist, rec_id, meta))
+
+            filtered_candidates.sort(key=lambda x: x[0], reverse=True)
+            for final_score, dist, rec_id, meta in filtered_candidates[:k]:
+                results.append(
+                    SearchResult(
+                        id=rec_id,
+                        score=final_score,
+                        distance=dist,
+                        metadata=meta
+                    )
+                )
+            return results
+
+        # Unfiltered HNSW beam search
+        candidates = self._search_layer(q, [curr_obj], ef, 0)
+        unfiltered_res: List[Tuple[float, float, str, Dict[str, Any]]] = []
 
         for dist, rec_id in candidates:
             meta = self.metadata_store.get(rec_id, {})
-            if filter_dict and not matches_filter(meta, filter_dict):
-                continue
+            base_score = distance_to_score(dist, self.metric)
+            kw_boost = 0.0
+            if kw_list:
+                snippet = str(meta.get("text_snippet", "")).lower()
+                match_count = sum(1 for kw in kw_list if kw in snippet)
+                if match_count > 0:
+                    kw_boost = (match_count / len(kw_list)) * 3.5
+            final_score = base_score + kw_boost
+            unfiltered_res.append((final_score, dist, rec_id, meta))
 
+        unfiltered_res.sort(key=lambda x: x[0], reverse=True)
+        for final_score, dist, rec_id, meta in unfiltered_res[:k]:
             results.append(
                 SearchResult(
                     id=rec_id,
-                    score=distance_to_score(dist, self.metric),
+                    score=final_score,
                     distance=dist,
                     metadata=meta
                 )
             )
-            found_ids.add(rec_id)
-            if len(results) == k:
-                break
-
-        # If filtered results are fewer than k, check remaining matching items
-        # to guarantee 100% recall even for highly selective metadata filters
-        if filter_dict and len(results) < k:
-            remaining: List[Tuple[float, str, Dict[str, Any]]] = []
-            for rec_id, vec in self.vectors.items():
-                if rec_id not in found_ids:
-                    meta = self.metadata_store.get(rec_id, {})
-                    if matches_filter(meta, filter_dict):
-                        d = self._dist(q, vec)
-                        remaining.append((d, rec_id, meta))
-
-            if remaining:
-                remaining.sort(key=lambda x: x[0])
-                for dist, rec_id, meta in remaining:
-                    results.append(
-                        SearchResult(
-                            id=rec_id,
-                            score=distance_to_score(dist, self.metric),
-                            distance=dist,
-                            metadata=meta
-                        )
-                    )
-                    if len(results) == k:
-                        break
 
         return results
 
@@ -337,10 +368,13 @@ class HNSWIndex(VectorIndex):
         self.ef_search = data.get("ef_search", 32)
         self.entry_point = data.get("entry_point")
         self.max_layer = data.get("max_layer", -1)
-        self.node_layers = data.get("node_layers", {})
-        self.vectors = {
-            k: np.array(v, dtype=np.float32) for k, v in data.get("vectors", {}).items()
-        }
+        raw_vecs = data.get("vectors", {})
+        if raw_vecs:
+            vec_keys = list(raw_vecs.keys())
+            vec_matrix = np.array([raw_vecs[k] for k in vec_keys], dtype=np.float32)
+            self.vectors = {k: vec_matrix[i] for i, k in enumerate(vec_keys)}
+        else:
+            self.vectors = {}
         self.metadata_store = data.get("metadata_store", {})
         self.graphs = [
             {node_id: set(neighbors) for node_id, neighbors in layer_dict.items()}

@@ -111,6 +111,7 @@ def insert_record(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/collections/{name}/insert/batch", response_model=StatusResponse)
+@router.post("/collections/{name}/batch_insert", response_model=StatusResponse)
 def insert_batch(
     name: str,
     req: BatchInsertRequest,
@@ -161,7 +162,7 @@ def search_vectors(
         )
 
     start_time = time.perf_counter()
-    results = coll.search(req.vector, k=req.k, filter_dict=req.filter)
+    results = coll.search(req.vector, k=req.k, filter_dict=req.filter, keywords=req.keywords)
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 
     return SearchResponse(

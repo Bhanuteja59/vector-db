@@ -1,3 +1,9 @@
+try:
+    import orjson
+    HAS_ORJSON = True
+except ImportError:
+    HAS_ORJSON = False
+
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -50,17 +56,27 @@ class PersistenceManager:
         final_path = self._snapshot_path(name)
 
         # Atomic write via rename
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        if HAS_ORJSON:
+            with open(temp_path, "wb") as f:
+                f.write(orjson.dumps(data))
+        else:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f)
         temp_path.replace(final_path)
 
     def load_snapshot(self, name: str, index: VectorIndex) -> bool:
         path = self._snapshot_path(name)
         if not path.exists():
             return False
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            index.deserialize(data)
+
+        if HAS_ORJSON:
+            with open(path, "rb") as f:
+                data = orjson.loads(f.read())
+        else:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+        index.deserialize(data)
         return True
 
     def delete_collection_files(self, name: str) -> None:
